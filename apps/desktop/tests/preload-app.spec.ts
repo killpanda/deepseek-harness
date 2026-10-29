@@ -8,7 +8,8 @@ import { DESKTOP_IPC, type DshDesktopProductApi } from '../src/ipc.ts'
 
 const electron = vi.hoisted(() => ({
   contextBridge: { exposeInMainWorld: vi.fn() },
-  ipcRenderer: { invoke: vi.fn(), on: vi.fn(), off: vi.fn(), send: vi.fn() },
+  // sendSync answers the Linux Omarchy theme read; null means no Omarchy theme is active.
+  ipcRenderer: { invoke: vi.fn(), on: vi.fn(), off: vi.fn(), send: vi.fn(), sendSync: vi.fn(() => null) },
   webUtils: { getPathForFile: vi.fn() },
 }))
 vi.mock('electron', () => electron)

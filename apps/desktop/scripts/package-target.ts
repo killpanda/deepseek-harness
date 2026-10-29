@@ -24,6 +24,7 @@ import { DESKTOP_BUILD_VERSION_ENV, resolveDesktopBuildVersion, validateDesktopB
 import { suggestDesktopBuildVersion } from './desktop-build-version-discovery.ts'
 import { desktopBuildCommitEnvironment, readDesktopBuildCommit, resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
 import { requireDesktopToolchain } from './desktop-toolchain-preflight.ts'
+import { pnpmInvocation } from '../../../scripts/pnpm-invocation.ts'
 import { withMacOSNotarizationProxy } from './macos-notarization-proxy.ts'
 
 const APP_ROOT = resolve(import.meta.dirname, '..')
@@ -49,6 +50,9 @@ const AUTOMATIC_BUILD_VERSION = 'auto'
 
 /** Fixed platform and architecture identifiers exposed by package scripts. */
 export type DesktopPackageTargetName = 'mac-arm64' | 'mac-x64' | 'win-x64' | 'linux-x64'
+
+/** Targets that publish signed releases and auto-updates; Linux builds are local and unsigned only. */
+export type DesktopReleaseTargetName = Exclude<DesktopPackageTargetName, 'linux-x64'>
 
 /** One supported release target and its electron-builder selectors. */
 export interface DesktopPackageTarget {
@@ -142,7 +146,7 @@ function packageVersion(path: string, label: string): string {
 }
 
 function writeReleaseRecord(
-  target: DesktopPackageTarget,
+  target: DesktopPackageTarget & { readonly name: DesktopReleaseTargetName },
   environment: NodeJS.ProcessEnv,
   artifactsRoot: string,
 ): void {
@@ -310,9 +314,10 @@ function runPnpm(
   if (pnpmEntry === undefined || pnpmEntry === '') {
     throw new Error('desktop package: invoke this script through a pnpm package command')
   }
-  if (run !== undefined) return run.run(args.join(' '), process.execPath, [pnpmEntry, ...args], { cwd, env })
+  const pnpm = pnpmInvocation(args, { npm_execpath: pnpmEntry })
+  if (run !== undefined) return run.run(args.join(' '), pnpm.command, pnpm.args, { cwd, env })
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, [pnpmEntry, ...args], {
+    const child = spawn(pnpm.command, pnpm.args, {
       cwd,
       env,
       stdio: 'inherit',
@@ -440,8 +445,11 @@ export async function packageTarget(
   const packConcurrency = mac?.packConcurrency ?? resolveWindowsPackageSettings(environment).packConcurrency
   const packArguments = ['--concurrency', String(packConcurrency)]
   const buildPaths = desktopTargetBuildPaths(target.name, environment)
-  const releaseRecordPath = join(buildPaths.artifacts, desktopBuildRecordFilename(target.name))
-  if (!invocation.prepareOnly && !invocation.unsigned && !invocation.skipNotarization) {
+  const releaseTarget = target.name === 'linux-x64' ? undefined : { ...target, name: target.name }
+  const releaseRecordPath = releaseTarget === undefined
+    ? undefined
+    : join(buildPaths.artifacts, desktopBuildRecordFilename(releaseTarget.name))
+  if (releaseRecordPath !== undefined && !invocation.prepareOnly && !invocation.unsigned && !invocation.skipNotarization) {
     rmSync(releaseRecordPath, { force: true })
     rmSync(`${releaseRecordPath}.tmp`, { force: true })
   }
@@ -574,8 +582,8 @@ export async function packageTarget(
     await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts',
       ...(invocation.unsigned ? ['--unsigned'] : []), ...(invocation.skipNotarization ? ['--skip-notarization'] : [])], targetEnv)
   }
-  if (!invocation.directory && !invocation.unsigned && !invocation.skipNotarization) {
-    writeReleaseRecord(target, electronBuilderEnv, buildPaths.artifacts)
+  if (releaseTarget !== undefined && !invocation.directory && !invocation.unsigned && !invocation.skipNotarization) {
+    writeReleaseRecord(releaseTarget, electronBuilderEnv, buildPaths.artifacts)
   }
   if (journal) recordPackagingEvent(journal, { type: 'artifacts', directory: artifactsRoot })
 }
