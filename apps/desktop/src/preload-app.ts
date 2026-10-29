@@ -6,6 +6,7 @@ import { DESKTOP_IPC, SCHEME, type DshDesktopProductApi, type DesktopUpdatePrese
 import { PLATFORM_IPC } from './platform-ipc.ts'
 import { markDocumentPlatform, syncWindowFullscreen } from './preload-platform.ts'
 import { syncNativeTheme } from './preload-theme.ts'
+import { syncOmarchyTheme } from './preload-omarchy.ts'
 import { syncWindowsAppearance } from './preload-windows.ts'
 import { installMandatoryUpdateOverlay } from './preload-mandatory-overlay.ts'
 import { createDesktopBrowserBridge } from './preload-browser.ts'
@@ -84,6 +85,7 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
     else body.setAttribute('tabindex', previous)
   })
   syncWindowsAppearance()
+  syncOmarchyTheme()
   if (process.platform === 'win32') installMandatoryUpdateOverlay()
   contextBridge.exposeInMainWorld('__DSH_DIRECTORY_PICKER__', {
     pick: () => ipcRenderer.invoke(DESKTOP_IPC.directoryPick) as Promise<string | null>,

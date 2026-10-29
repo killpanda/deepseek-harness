@@ -66,6 +66,7 @@ import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
+import { DesktopOmarchyTheme, omarchyCurrentDirectory } from './omarchy-theme.ts'
 
 let focusPrimaryWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => { await stopOperationReports() }
@@ -255,6 +256,9 @@ function platformLoginUrl(authorizeUrl: string): string {
   return url.href
 }
 
+/** Omarchy theme follower; created on Linux before the first window. */
+let omarchyTheme: DesktopOmarchyTheme | undefined
+
 function createWindow(preload: string, show = false, primary = false): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -262,6 +266,13 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
     minWidth: 520,
     minHeight: 600,
     show,
+    // Hyprland tiles and decorates windows itself; native decorations and the menu bar would duplicate them.
+    ...(process.platform === 'linux' ? {
+      autoHideMenuBar: true,
+      ...(process.env.HYPRLAND_INSTANCE_SIGNATURE === undefined ? {} : { frame: false }),
+      ...(primary && omarchyTheme?.activePalette !== undefined
+        ? { backgroundColor: omarchyTheme.activePalette.colors.background } : {}),
+    } : {}),
     ...(process.platform === 'win32' && primary ? {
       titleBarStyle: 'hidden' as const,
       titleBarOverlay: { height: WINDOWS_TITLEBAR_HEIGHT, color: chromeFallbackFill(),
@@ -366,6 +377,11 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
 
 async function main(): Promise<void> {
   const desktopSettings = readDesktopSettings(app.getPath('userData'))
+  if (process.platform === 'linux') {
+    const theme = new DesktopOmarchyTheme(omarchyCurrentDirectory(), nativeTheme)
+    omarchyTheme = theme
+    app.on('will-quit', () => { theme.dispose() })
+  }
   void pruneCrashReports(app.getPath('logs'))
   const journalDirectory = process.env.DSH_DESKTOP_UPDATE_JOURNAL_DIR
   const updateJournal = journalDirectory === undefined ? undefined : new DesktopUpdateJournal(journalDirectory, app.getVersion())
@@ -843,7 +859,13 @@ async function main(): Promise<void> {
   // Only the main window may synchronize its palette with the native material.
   ipcMain.on(DESKTOP_IPC.nativeThemeSet, (event, source: unknown) => {
     if (mainWindow === undefined || event.sender !== mainWindow.webContents) return
-    if (source === 'light' || source === 'dark' || source === 'system') nativeTheme.themeSource = source
+    if (source !== 'light' && source !== 'dark' && source !== 'system') return
+    if (omarchyTheme === undefined) nativeTheme.themeSource = source
+    else omarchyTheme.setRendererSource(source)
+  })
+  ipcMain.on(DESKTOP_IPC.omarchyThemeRead, (event) => {
+    if (omarchyTheme === undefined) event.returnValue = null
+    else omarchyTheme.answer(event)
   })
   ipcMain.handle(DESKTOP_IPC.localeBootstrap, async (event) => {
     if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame
@@ -1166,6 +1188,7 @@ async function main(): Promise<void> {
   const createMainWindow = (): BrowserWindow => {
     const window = createWindow(appPreload, false, true)
     mainWindow = window
+    omarchyTheme?.attach(window)
     browserGuests.bind(window, (guest, name) => shortcuts.attachGuest(window, guest, name))
     shortcuts.attach(window)
     window.on('focus', automaticCheck)
