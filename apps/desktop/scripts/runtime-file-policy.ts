@@ -43,6 +43,8 @@ export function desktopRuntimeFileExclusion(
     if (platform !== undefined && platform !== `${target.platform}-${target.arch}`) return 'node-pty other platform'
     if (file.endsWith('.pdb')) return 'node-pty debug symbols'
   }
+  // Linux Electron leaks the system glib into sharp's native libvips; sharp falls back to @img/sharp-wasm32 there.
+  if (target.platform === 'linux' && /^@img\/sharp-(?:libvips-)?linux(?:musl)?-/u.test(name)) return 'sharp native addon under Linux Electron'
   if (name === '@koromix/koffi-win32-x64' && entry === 'win32_x64/koffi.lib') return 'Koffi import library'
   return undefined
 }
