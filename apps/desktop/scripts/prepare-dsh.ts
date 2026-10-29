@@ -5,8 +5,9 @@ import { packagingStep } from './packaging-step.mjs'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { delimiter, join, relative, resolve } from 'node:path'
+import { delimiter, dirname, join, relative, resolve } from 'node:path'
 import { desktopNodeEnvironment } from '../src/node-environment.ts'
 import { createRuntimeProjectMetadata } from '../src/project-manager.ts'
 import { DESKTOP_HOST_PROTOCOL_VERSION } from '../src/host-protocol.ts'
@@ -44,13 +45,38 @@ const STORE_ROOT = BUILD_PATHS.pnpmStore
 const RUNTIME_ROOT = BUILD_PATHS.runtime
 const PNPM_BUILD_STATE = BUILD_PATHS.dshPnpm
 const PACKAGE_SET_ROOT = BUILD_PATHS.packageSet
-const NODE = join(BUILD_PATHS.electron, process.platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
+const NODE = join(BUILD_PATHS.electron, process.platform === 'win32' ? 'electron.exe' : process.platform === 'linux' ? 'electron' : 'Electron.app/Contents/MacOS/Electron')
 const PNPM = join(RUNTIME_ROOT, 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.mjs')
 
 function manifestVersion(path: string, subject: string): string {
   const manifest = JSON.parse(readFileSync(path, 'utf8')) as { version?: unknown }
   if (typeof manifest.version !== 'string') throw new Error(`desktop runtime: ${subject} has no version`)
   return manifest.version
+}
+
+/** sharp's WebAssembly build; Linux runtimes load it instead of the native addon. */
+const SHARP_WASM_PACKAGE = '@img/sharp-wasm32'
+
+/**
+ * Linux Electron links the system glib into its Node runtime, so sharp's native libvips binds to the
+ * wrong glib and crashes on its first decode (sharp's "Electron and Linux" caveat). The Linux runtime
+ * therefore installs sharp's WebAssembly build, and the runtime file policy omits the native addon.
+ * @param projectDir - Runtime build project whose manifest gains the dependency.
+ */
+function addLinuxSharpWasm(projectDir: string): void {
+  // sharp's export map hides its manifest, so walk up from the entry point to the package root.
+  let sharpRoot = dirname(createRequire(join(APP_ROOT, 'package.json')).resolve('sharp'))
+  while (!existsSync(join(sharpRoot, 'package.json'))
+    || (JSON.parse(readFileSync(join(sharpRoot, 'package.json'), 'utf8')) as { name?: unknown }).name !== 'sharp') {
+    const parent = dirname(sharpRoot)
+    if (parent === sharpRoot) throw new Error('desktop runtime: sharp package root not found')
+    sharpRoot = parent
+  }
+  const sharpVersion = manifestVersion(join(sharpRoot, 'package.json'), 'sharp package')
+  const path = join(projectDir, 'package.json')
+  const manifest = JSON.parse(readFileSync(path, 'utf8')) as { dependencies?: Record<string, string> }
+  manifest.dependencies = { ...manifest.dependencies, [SHARP_WASM_PACKAGE]: sharpVersion }
+  writeFileSync(path, `${JSON.stringify(manifest, undefined, 2)}\n`, { mode: 0o600 })
 }
 
 function desktopRelease(): DesktopRelease {
@@ -127,6 +153,7 @@ async function main(): Promise<void> {
       copyFileSync(join(PACKAGE_SET_ROOT, DESKTOP_PACKAGE_SET_FILE), join(BUILD_ROOT, DESKTOP_PACKAGE_SET_FILE))
       cpSync(join(PACKAGE_SET_ROOT, DESKTOP_PACKAGES_DIR), join(BUILD_ROOT, DESKTOP_PACKAGES_DIR), { recursive: true })
       createRuntimeProjectMetadata(BUILD_ROOT, release)
+      if (desktopTargetPlatform(resolveDesktopBuildTarget()).platform === 'linux') addLinuxSharpWasm(BUILD_ROOT)
       return prepareRuntimePatches(BUILD_ROOT, resolve(APP_ROOT, '..', '..'))
     })
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:lockfile', () => runPnpm(['install', '--lockfile-only']))

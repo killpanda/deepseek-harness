@@ -33,6 +33,8 @@ export const DESKTOP_IPC = {
   updatesOpen: 'dsh-desktop:updates-open',
   updatesPresentation: 'dsh-desktop:updates-presentation',
   nativeThemeSet: 'dsh-desktop:native-theme-set',
+  omarchyTheme: 'dsh-desktop:omarchy-theme',
+  omarchyThemeRead: 'dsh-desktop:omarchy-theme-read',
   windowFullscreen: 'dsh-desktop:window-fullscreen',
   windowsAppearance: 'dsh-desktop:windows-appearance',
   windowsMenu: 'dsh-desktop:windows-menu',

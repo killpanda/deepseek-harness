@@ -91,6 +91,16 @@ it('retains native prebuilds for the selected macOS architecture', () => {
   expect(desktopRuntimeFileExclusion('node-pty/prebuilds/win32-x64/conpty.node', mac, 'darwin-arm64')).toBeDefined()
 })
 
+it('replaces native sharp with its WebAssembly build only under Linux Electron', () => {
+  const linux = { platform: 'linux' as const, arch: 'x64' }
+  const mac = { platform: 'darwin' as const, arch: 'arm64' }
+  expect(desktopRuntimeFileExclusion('@img/sharp-linux-x64/lib/sharp-linux-x64.node', linux, 'wasm')).toBeDefined()
+  expect(desktopRuntimeFileExclusion('@img/sharp-libvips-linux-x64/lib/libvips-cpp.so.8', linux, 'wasm')).toBeDefined()
+  expect(desktopRuntimeFileExclusion('@img/sharp-wasm32/lib/sharp-wasm32.node.wasm', linux, 'wasm')).toBeUndefined()
+  expect(desktopRuntimeFileExclusion('sharp/package.json', linux, 'wasm')).toBeUndefined()
+  expect(desktopRuntimeFileExclusion('@img/sharp-darwin-arm64/lib/sharp-darwin-arm64.node', mac, 'darwin-arm64')).toBeUndefined()
+})
+
 it.each([
   ['darwin', 'arm64'], ['darwin', 'x64'],
   ['linux', 'arm64'], ['linux', 'x64'],
